@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<schemalist>
+    <schema id="de.geselle_ffm.PepRunner" path="/de/geselle_ffm/PepRunner/">
+        <key name="last-dir" type="s">
+            <default>''</default>
+            <summary>Last directory visited</summary>
+        </key>
+        <key name="device" type="s">
+            <default>''</default>
+            <summary>PEP3 device node</summary>
+        </key>
+        <key name="filter-u" type="b">
+            <default>false</default>
+            <summary>Use U filter by default</summary>
+        </key>
+        <key name="filter-b" type="b">
+            <default>false</default>
+            <summary>Use B filter by default</summary>
+        </key>
+        <key name="filter-v" type="b">
+            <default>false</default>
+            <summary>Use V filter by default</summary>
+        </key>
+        <key name="filter-r" type="b">
+            <default>false</default>
+            <summary>Use R filter by default</summary>
+        </key>
+        <key name="filter-i" type="b">
+            <default>false</default>
+            <summary>Use I filter by default</summary>
+        </key>
+    </schema>
+</schemalist>

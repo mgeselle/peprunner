@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+    <menu id="main-menu">
+        <item>
+            <attribute name="label" translatable="yes">_New</attribute>
+            <!-- Action names must be absolute, i.e. with action group -->
+            <attribute name="action">win.file_new</attribute>
+        </item>
+        <item>
+            <attribute name="label" translatable="yes">_Open</attribute>
+            <attribute name="action">win.file_open</attribute>
+        </item>
+        <item>
+            <attribute name="label" translatable="yes">_Save</attribute>
+            <attribute name="action">win.file_save</attribute>
+        </item>
+        <item>
+            <attribute name="label" translatable="yes">_Configure...</attribute>
+            <attribute name="action">win.configure</attribute>
+        </item>
+        <item>
+            <attribute name="label" translatable="yes">_Generate...</attribute>
+            <attribute name="action">win.gen_run</attribute>
+        </item>
+    </menu>
+    <template class="MainWindow" parent="GtkApplicationWindow">
+        <property name="title">PEP Runner</property>
+        <property name="width-request">300</property>
+        <child type="titlebar">
+            <object class="GtkHeaderBar">
+                <child type="end">
+                    <object class="GtkMenuButton" id="main_menu_mb">
+                        <property name="icon-name">open-menu-symbolic</property>
+                        <property name="menu-model">main-menu</property>
+                    </object>
+                </child>
+            </object>
+        </child>
+        <child>
+            <!-- Filters -->
+            <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <child>
+                    <object class="GtkBox">
+                        <property name ="orientation">horizontal</property>
+                        <property name="margin-top">12</property>
+                        <property name="margin-bottom">6</property>
+                        <property name="margin-start">12</property>
+                        <property name="margin-end">12</property>
+                        <child>
+                            <object class="GtkLabel">
+                                <property name="label">Filter:</property>
+                                <property name="margin-end">15</property>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkCheckButton" id="filter_u">
+                                <property name="label">U</property>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkCheckButton" id="filter_b">
+                                <property name="label">B</property>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkCheckButton" id="filter_v">
+                                <property name="label">V</property>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkCheckButton" id="filter_r">
+                                <property name="label">R</property>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkCheckButton" id="filter_i">
+                                <property name="label">I</property>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+                <!-- Star input -->
+                <child>
+                    <object class="GtkBox">
+                        <property name="orientation">horizontal</property>
+                        <property name="margin-top">6</property>
+                        <property name="margin-bottom">12</property>
+                        <property name="margin-start">12</property>
+                        <property name="margin-end">12</property>
+                        <property name="spacing">12</property>
+                        <child>
+                            <object class="GtkDropDown" id="star_type_dd">
+                                <property name="model">
+                                    <object class="GtkStringList">
+                                        <items>
+                                            <item>CMP</item>
+                                            <item>PGM</item>
+                                            <item>CHK</item>
+                                            <item>EXT</item>
+                                        </items>
+                                    </object>
+                                </property>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkEntry" id="star_name_entry">
+                                <property name="placeholder-text">Star Name</property>
+                                <property name="max-length">11</property>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+                <child>
+                    <object class="GtkScrolledWindow">
+                        <property name="hscrollbar-policy">never</property>
+                        <property name="vscrollbar-policy">always</property>
+                        <property name="min-content-height">400</property>
+                        <property name="vexpand">true</property>
+                        <property name="has-frame">true</property>
+                        <child>
+                            <object class="GtkListView" id="star_list_vw">
+                                <property name="valign">start</property>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+                <child>
+                    <object class="GtkCenterBox">
+                        <child type="center">
+                            <object class="GtkButton" id="execute_button">
+                                <property name="label">Execute</property>
+                                <property name="margin-top">12</property>
+                                <property name="margin-bottom">12</property>
+                                <property name="margin-start">12</property>
+                                <property name="margin-end">12</property>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+            </object>
+        </child>
+    </template>
+</interface>

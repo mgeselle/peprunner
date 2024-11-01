@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<interface>
+    <template class="StarObjectRow" parent="GtkBox">
+        <child>
+            <object class="GtkLabel" id="type_label">
+                <property name="width-chars">4</property>
+                <property name="margin-top">6</property>
+                <property name="margin-bottom">6</property>
+                <property name="margin-start">12</property>
+                <property name="margin-end">6</property>
+            </object>
+        </child>
+        <child>
+            <object class="GtkLabel" id="name_label">
+                <property name="margin-top">6</property>
+                <property name="margin-bottom">6</property>
+                <property name="margin-start">6</property>
+                <property name="margin-end">12</property>
+            </object>
+        </child>
+    </template>
+</interface>

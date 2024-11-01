@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<gresources>
+    <gresource prefix="/de/geselle_ffm/peprunner/">
+        <file compressed="true" preprocess="xml-stripblanks">main_window.ui</file>
+        <file compressed="true" preprocess="xml-stripblanks">star_object_row.ui</file>
+        <file compressed="true" preprocess="xml-stripblanks">config_dialog.ui</file>
+        <file compressed="true" preprocess="xml-stripblanks">generate_run_dialog.ui</file>
+    </gresource>
+</gresources>
