@@ -127,7 +127,9 @@ impl Ssp3 {
         if self.filter > 6 {
             return Ok(())
         }
-        self.write_with_ack("SEND..", 5).expect("SSP shutdown failed");
+        if self.write_with_ack("SEND..", 5).is_err() {
+            eprintln!("SSP3 shutdown failed");
+        }
         self.filter = 7;
         Ok(())
     }

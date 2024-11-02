@@ -1,19 +1,20 @@
 use crate::common::PepRun;
+use crate::measurement::SspRequest::{Finish, Measure};
 use crate::ssp3;
 use crate::ssp3::Ssp3;
 use crate::util::show_error;
+use async_channel::{Receiver, Sender};
 use chrono::{DateTime, Utc};
-use gtk::prelude::{DialogExt, FileChooserExt, FileChooserExtManual, FileExt, GtkWindowExt, IsA, NativeDialogExt, WidgetExt};
-use gtk::{gio, glib, ButtonsType, DialogFlags, FileChooserAction, FileChooserNative, MessageDialog, MessageType, ResponseType, Window};
+use csv::Writer;
+use gtk::glib::IntoGStr;
+use gtk::prelude::{DialogExt, FileChooserExt, FileChooserExtManual, FileExt, GtkWindowExt, IsA, WidgetExt};
+use gtk::{gio, glib, ButtonsType, DialogFlags, FileChooserAction, FileChooserDialog, MessageDialog, MessageType, ResponseType, Window};
 use serde::Serialize;
 use std::borrow::BorrowMut;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::sync::{Arc, Mutex};
-use async_channel::{Receiver, Sender};
-use csv::Writer;
-use gtk::glib::IntoGStr;
-use crate::measurement::SspRequest::{Finish, Measure};
+
 
 struct State {
     run: PepRun,
@@ -106,9 +107,10 @@ where F: Clone + FnOnce() -> () + 'static {
         }
     }
 
-    let dialog = FileChooserNative::new(Some("Save Run Log"), Some(&parent), FileChooserAction::Save, None, None);
+    let dialog = FileChooserDialog::new(Some("Save Run Log"), Some(&parent), FileChooserAction::Save, &[("OK", ResponseType::Ok)]);
     dialog.set_current_folder(Some(&last_dir)).expect("Unable to set current directory");
     dialog.connect_response(move |dlg, response| {
+        dlg.hide();
         if response != ResponseType::Cancel {
            if let Some(file) = dlg.file() {
                let path = file.path().unwrap();
@@ -120,16 +122,20 @@ where F: Clone + FnOnce() -> () + 'static {
                        run_step(state_arc.clone(), writer_arc.clone(), parent.clone(), gui_ssp_snd.clone(), ssp_gui_rcv.clone(), completion_callback.clone());
                    }
                    Err(e) => {
-                       gui_ssp_snd.send_blocking(SspRequest::Finish()).expect("Error shutting down SSP");
+                       gui_ssp_snd.send_blocking(Finish()).expect("Error shutting down SSP");
                        show_error(Some(&parent), Some("Error Opening Run Log"), e);
                        completion_callback.clone()();
                    }
                }
-
            }
+        }
+        dlg.destroy();
+        if response != ResponseType::Ok && response != ResponseType::Accept {
+            completion_callback.clone()();
         }
     });
 
+    dialog.show();
 }
 
 fn run_step<F>(state: Arc<Mutex<State>>, writer: Arc<Mutex<Writer<File>>>, parent: impl IsA<Window>, sender: Sender<SspRequest>, receiver: Receiver<SspResponse>, completion_callback: F)
@@ -167,9 +173,7 @@ where F: FnOnce() -> () + Clone + 'static {
         let cloned_sender = sender.clone();
         let cloned_receiver = receiver.clone();
         let cloned_completion_callback = completion_callback.clone();
-        glib::spawn_future_local(async move {
-            measure(cloned_state, cloned_writer, cloned_parent, cloned_sender, cloned_receiver, cloned_completion_callback)
-        });
+        measure(cloned_state, cloned_writer, cloned_parent, cloned_sender, cloned_receiver, cloned_completion_callback)
     });
     dialog.show();
 }
@@ -185,159 +189,173 @@ fn abort_with_msg(parent: impl IsA<Window>, message: impl IntoGStr, completion_c
     dialog.show();
 }
 
-async fn measure<F>(state: Arc<Mutex<State>>, writer: Arc<Mutex<Writer<File>>>, parent: impl IsA<Window>, sender: Sender<SspRequest>, receiver: Receiver<SspResponse>, completion_callback: F)
+fn measure<F>(state: Arc<Mutex<State>>, writer: Arc<Mutex<Writer<File>>>, parent: impl IsA<Window>, sender: Sender<SspRequest>, receiver: Receiver<SspResponse>, completion_callback: F)
 where F: FnOnce() -> () + Clone + 'static
 {
-    let mut state_data = state.lock().unwrap();
-    let star_index = state_data.star_index as usize;
-    let star_name = String::from(&state_data.run.items[star_index].name);
-    let star_type = String::from(&state_data.run.items[star_index].star_type);
+    glib::spawn_future_local(async move {
+        let mut state_data = state.lock().unwrap();
+        let star_index = state_data.star_index as usize;
+        let star_name = String::from(&state_data.run.items[star_index].name);
+        let star_type = String::from(&state_data.run.items[star_index].star_type);
 
-    for filter_index in state_data.filter_index as usize .. state_data.run.filters.len() {
-        let filter_map = state_data.i_time_by_star.get(&star_name).unwrap();
-        let filter_slot = state_data.run.filters[filter_index];
-        let (i_time, mut calibrate_i_time) = match filter_map.get(&filter_slot) {
-            Some(m_i_time) => {
-                (*m_i_time, false)
-            }
-            None => {
-                if filter_slot < 2 {
-                    (2000u16, true)
-                } else {
-                    (1000u16, true)
+        for filter_index in state_data.filter_index as usize..state_data.run.filters.len() {
+            let filter_map = state_data.i_time_by_star.get(&star_name).unwrap();
+            let filter_slot = state_data.run.filters[filter_index];
+            let (i_time, mut calibrate_i_time) = match filter_map.get(&filter_slot) {
+                Some(m_i_time) => {
+                    (*m_i_time, false)
                 }
-            }
-        };
-        let mut used_i_time = i_time;
-        let was_calibrated = calibrate_i_time;
-        let mut count_slots: [u16; 3] = [0; 3];
-        let mut count_slot: usize = 0;
-
-        let start_time = Utc::now();
-        loop {
-            let command = Measure(filter_slot + 1, used_i_time);
-            match sender.send(command).await {
-                Ok(_) => {
-                    match receiver.recv().await {
-                        Ok(SspResponse::Counts(counts)) => {
-                            if calibrate_i_time && count_slot == 0 {
-                                if counts > 5000 {
-                                    calibrate_i_time = false;
-                                    count_slots[0] = counts;
-                                } else if count_slots[0] == 0 {
-                                    count_slots[0] = counts;
-                                    used_i_time = i_time + 500;
-                                } else {
-                                    if counts > count_slots[0] {
-                                        let delta_t_s = (5 * (5000 - count_slots[0])) / (counts - count_slots[0]);
-                                        if delta_t_s > 0 {
-                                            used_i_time = i_time + 100 * delta_t_s;
-                                        } else {
-                                            used_i_time = i_time;
-                                            count_slot += 1;
-                                        }
-                                    } else {
-                                        used_i_time = 3000;
-                                    }
-                                }
-                            } else {
-                                count_slots[count_slot] = counts;
-                                count_slot += 1;
-                                if count_slot == 3 {
-                                    break;
-                                }
-                            }
-                        }
-                        Ok(SspResponse::Error(e)) => {
-                            sender.send(Finish()).await.expect("Error shutting down SSP");
-                            drop(state_data);
-                            abort_with_msg(parent.clone(), e.to_string(), completion_callback.clone());
-                            return;
-                        }
-                        Ok(_) => {
-                            sender.send(Finish()).await.expect("Error shutting down SSP");
-                            drop(state_data);
-                            abort_with_msg(parent.clone(), "Unexpected SSP response", completion_callback.clone());
-                            return;
-                        }
-                        Err(_) => {
-                            drop(state_data);
-                            abort_with_msg(parent.clone(), "Error receiving from SSP", completion_callback.clone());
-                            return;
-                        }
+                None => {
+                    if filter_slot < 2 {
+                        (2000u16, true)
+                    } else {
+                        (1000u16, true)
                     }
                 }
-                Err(_) => {
+            };
+            let mut used_i_time = i_time;
+            let was_calibrated = calibrate_i_time;
+            let mut count_slots: [u16; 3] = [0; 3];
+            let mut count_slot: usize = 0;
+
+            let start_time = Utc::now();
+            loop {
+                let command = Measure(filter_slot + 1, used_i_time);
+                match sender.send(command).await {
+                    Ok(_) => {
+                        match receiver.recv().await {
+                            Ok(SspResponse::Counts(counts)) => {
+                                if calibrate_i_time && count_slot == 0 {
+                                    if counts > 5000 {
+                                        println!("Counts {} > 5000", counts);
+                                        calibrate_i_time = false;
+                                        count_slots[0] = counts;
+                                        count_slot += 1;
+                                    } else if count_slots[0] == 0 {
+                                        println!("Count < 5000 - calibrating...");
+                                        count_slots[0] = counts;
+                                        used_i_time = i_time + 500;
+                                    } else {
+                                        if counts > count_slots[0] {
+                                            let delta_t_s = (5 * (5000 - count_slots[0])) / (counts - count_slots[0]);
+                                            if delta_t_s > 0 {
+                                                used_i_time = i_time + 100 * delta_t_s;
+                                                if used_i_time > 5999 {
+                                                    used_i_time = 5999;
+                                                }
+                                                println!("Using calibrated integration time {}", used_i_time);
+                                            } else {
+                                                used_i_time = i_time;
+                                                count_slot += 1;
+                                                println!("Using initial integration time. Counts in slot 0: {}", count_slots[0]);
+                                            }
+                                        } else {
+                                            used_i_time = 3000;
+                                            println!("Using fallback integration time {}", used_i_time);
+                                        }
+                                        calibrate_i_time = false;
+                                    }
+                                } else {
+                                    count_slots[count_slot] = counts;
+                                    println!("Counts in slot {}: {}", count_slot, counts);
+                                    count_slot += 1;
+                                    if count_slot == 3 {
+                                        break;
+                                    }
+                                }
+                            }
+                            Ok(SspResponse::Error(e)) => {
+                                sender.send(Finish()).await.expect("Error shutting down SSP");
+                                drop(state_data);
+                                abort_with_msg(parent.clone(), e.to_string(), completion_callback.clone());
+                                return;
+                            }
+                            Ok(_) => {
+                                sender.send(Finish()).await.expect("Error shutting down SSP");
+                                drop(state_data);
+                                abort_with_msg(parent.clone(), "Unexpected SSP response", completion_callback.clone());
+                                return;
+                            }
+                            Err(_) => {
+                                drop(state_data);
+                                abort_with_msg(parent.clone(), "Error receiving from SSP", completion_callback.clone());
+                                return;
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        drop(state_data);
+                        abort_with_msg(parent.clone(), "Error sending to SSP", completion_callback.clone());
+                        return;
+                    }
+                }
+            }
+
+            if !state_data.sky {
+                let avg = count_slots.iter().map(|v| {*v as f32}).sum::<f32>() / count_slots.len() as f32;
+                let min = *count_slots.iter().min().unwrap() as f32;
+                let max = *count_slots.iter().max().unwrap() as f32;
+                println!("Avg: {}, min: {}, max: {}", avg, min, max);
+                if min < 0.99 * avg || max > 1.01 * avg {
+                    // More than 1% deviation: ask user to re-center
                     drop(state_data);
-                    abort_with_msg(parent.clone(), "Error sending to SSP", completion_callback.clone());
+                    run_with_msg(state.clone(), writer, parent, sender, receiver, completion_callback, "Deviation > 1%. Please re-center.");
                     return;
                 }
             }
-        }
 
-        if !state_data.sky {
-            let avg = count_slots.iter().sum::<u16>() as f32 / count_slots.len() as f32;
-            let min = *count_slots.iter().min().unwrap() as f32;
-            let max = *count_slots.iter().max().unwrap() as f32;
-            if min < 0.99 * avg || max > 1.01 * avg {
-                // More than 1% deviation: ask user to re-center
-                drop(state_data);
-                run_with_msg(state.clone(), writer, parent, sender, receiver, completion_callback, "Deviation > 1%. Please re-center.");
-                return;
+            let end_time = Utc::now();
+            let middle_time = start_time + end_time.signed_duration_since(start_time);
+            let filter = match filter_slot {
+                0 => { "U" }
+                1 => { "B" }
+                2 => { "V" }
+                3 => { "R" }
+                4 => { "I" }
+                5 => { "C" }
+                _ => { panic!("Unknown filter index {}", filter_slot); }
+            };
+            let measurement = Measurement {
+                timestamp: middle_time,
+                index: state_data.star_index,
+                star_id: &star_name,
+                star_type: &star_type,
+                is_star: !state_data.sky,
+                filter,
+                integration_time: used_i_time,
+                count1: count_slots[0],
+                count2: count_slots[1],
+                count3: count_slots[2],
+            };
+            let mut writer_obj = writer.lock().unwrap();
+            writer_obj.serialize(measurement).expect("Error serializing measurement");
+
+            if was_calibrated {
+                let filter_map: &mut HashMap<u8, u16> = state_data.i_time_by_star
+                    .get_mut(&star_name).unwrap();
+                filter_map.insert(filter_slot, used_i_time);
             }
         }
 
-        let end_time = Utc::now();
-        let middle_time = start_time + end_time.signed_duration_since(start_time);
-        let filter = match filter_index {
-            0 => { "U" }
-            1 => { "B" }
-            2 => { "V" }
-            3 => { "R" }
-            4 => { "I" }
-            5 => { "C" }
-            _ => { panic!("Unknown filter index {}", filter_index); }
-        };
-        let measurement = Measurement {
-            timestamp: middle_time,
-            index: state_data.star_index,
-            star_id: &star_name,
-            star_type: &star_type,
-            is_star: !state_data.sky,
-            filter,
-            integration_time: used_i_time,
-            count1: count_slots[0],
-            count2: count_slots[1],
-            count3: count_slots[2],
-        };
-        let mut writer_obj = writer.lock().unwrap();
-        writer_obj.serialize(measurement).expect("Error serializing measurement");
-
-        if was_calibrated {
-            let filter_map: &mut HashMap<u8, u16> = state_data.i_time_by_star
-                .get_mut(&star_name).unwrap();
-            filter_map.insert(filter_slot, used_i_time);
+        if state_data.sky {
+            state_data.sky = false;
+            state_data.star_index += 1;
+            if state_data.star_index as usize == state_data.run.items.len() {
+                sender.send(Finish()).await.expect("Error shutting down SSP");
+                completion_callback();
+                return;
+            }
+        } else {
+            state_data.sky = true;
         }
-    }
+        // Release Mutex
+        drop(state_data);
 
-    if state_data.sky {
-        state_data.sky = false;
-        state_data.star_index += 1;
-        if state_data.star_index as usize == state_data.run.items.len() {
-            sender.send(Finish()).await.expect("Error shutting down SSP");
-            completion_callback();
-            return;
-        }
-    } else {
-        state_data.sky = true;
-    }
-    // Release Mutex
-    drop(state_data);
-
-    run_step(state, writer, parent, sender, receiver, completion_callback);
+        run_step(state, writer, parent, sender, receiver, completion_callback);
+    });
 }
 
-fn run_ssp(device: String, gui_ssp_rcv: async_channel::Receiver<SspRequest>, ssp_gui_snd: async_channel::Sender<SspResponse>) {
+fn run_ssp(device: String, gui_ssp_rcv: Receiver<SspRequest>, ssp_gui_snd: Sender<SspResponse>) {
     match Ssp3::new(device.as_str()) {
         Ok(mut ssp3) => {
             ssp_main_loop(ssp3.borrow_mut(), &gui_ssp_rcv, &ssp_gui_snd);
@@ -349,7 +367,7 @@ fn run_ssp(device: String, gui_ssp_rcv: async_channel::Receiver<SspRequest>, ssp
     }
 }
 
-fn ssp_main_loop(device: &mut Ssp3, gui_ssp_rcv: &async_channel::Receiver<SspRequest>, ssp_gui_snd: &async_channel::Sender<SspResponse>) {
+fn ssp_main_loop(device: &mut Ssp3, gui_ssp_rcv: &Receiver<SspRequest>, ssp_gui_snd: &Sender<SspResponse>) {
     while let Ok(request) = gui_ssp_rcv.recv_blocking() {
         match request {
             SspRequest::Init() => {
@@ -369,7 +387,7 @@ fn ssp_main_loop(device: &mut Ssp3, gui_ssp_rcv: &async_channel::Receiver<SspReq
                     }
                 }
             }
-            SspRequest::Measure(filter, time) => {
+            Measure(filter, time) => {
                 match device.measure(filter, time) {
                     Ok(counts) => {
                         if let Err(_) = ssp_gui_snd.send_blocking(SspResponse::Counts(counts)) {
@@ -386,7 +404,7 @@ fn ssp_main_loop(device: &mut Ssp3, gui_ssp_rcv: &async_channel::Receiver<SspReq
                     }
                 }
             }
-            SspRequest::Finish() => {
+            Finish() => {
                 if let Err(_) = ssp_gui_snd.send_blocking(SspResponse::Ok()) {
                     eprintln!("Error sending finish OK");
                 }

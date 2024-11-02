@@ -61,7 +61,7 @@ impl GenerateRunDialog {
         let cmp_str = "CMP".to_string();
         let chk_str = "CHK".to_string();
         let pgm_str = "PGM".to_string();
-        for _ in 0..4 {
+        for _ in 0..3 {
             stars.push(StarData::new(&cmp_str, &cmp));
             stars.push(StarData::new(&pgm_str, &pgm1));
             if ! pgm2.is_empty() {
